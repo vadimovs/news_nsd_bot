@@ -12,8 +12,10 @@ def post_message(text):
         "text": text,
         "disable_web_page_preview": True
     }
-    requests.post(url, data=data)
 
+    r = requests.post(url, data=data)
+    print("Telegram response:", r.text)
+    
 def main():
     now = datetime.utcnow().strftime("%H:%M UTC")
     text = f"🕒 {now}\n\nТест автопубликации. Бот работает."
