@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
-CHANNEL_ID = os.environ["CHANNEL_ID"]
+CHANNEL_ID = int(os.environ["CHANNEL_ID"])
 
 def post_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
