@@ -8,7 +8,7 @@ BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHANNEL_ID = int(os.environ["CHANNEL_ID"])
 
 def post_message(text):
-    def get_latest_news():
+def get_latest_news():
     feed = feedparser.parse("https://www.unian.net/rss/world")
     if not feed.entries:
         return None
