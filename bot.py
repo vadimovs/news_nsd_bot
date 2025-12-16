@@ -1,6 +1,7 @@
 import requests
 import os
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHANNEL_ID = int(os.environ["CHANNEL_ID"])
@@ -17,7 +18,7 @@ def post_message(text):
     print("Telegram response:", r.text)
     
 def main():
-    now = datetime.utcnow().strftime("%H:%M UTC")
+    now = datetime.now(ZoneInfo("Europe/Kyiv")).strftime("%H:%M")
         text = (
         "📰 НОВОСТИ СЕГО ДНЯ\n\n"
         "— Тестовая публикация\n"
