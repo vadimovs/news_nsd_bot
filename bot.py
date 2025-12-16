@@ -67,9 +67,10 @@ def get_latest_news():
 def main():
     news = get_latest_news()
     if not news:
-        print("No political news found")
+        print("No political news")
         return
 
     post_message(news)
+
 if __name__ == "__main__":
     main()
