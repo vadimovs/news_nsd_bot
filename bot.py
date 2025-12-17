@@ -1,114 +1,118 @@
 import os
 import hashlib
-import json
 import requests
 import feedparser
 from openai import OpenAI
 
-# =======================
-# ENV
-# =======================
-BOT_TOKEN = os.environ["BOT_TOKEN"].strip()
-CHANNEL_ID = os.environ["CHANNEL_ID"].strip()
-OPENAI_API_KEY = os.environ["OPENAI_API_KEY"].strip()
+BOT_TOKEN = os.environ["BOT_TOKEN"]
+CHANNEL_ID = os.environ["CHANNEL_ID"]
+OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# =======================
-# CONFIG
-# =======================
-RSS_FEEDS = {
-    "Политика": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
-    "Экономика": "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml",
-    "Технологии": "https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml",
-}
+POSTED_FILE = "posted.txt"
 
-POSTED_FILE = "posted.json"
-MAX_POSTS = 5
+RSS_SOURCES = [
+    # NY Times
+    ("NY Times", "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"),
+    ("NY Times Politics", "https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml"),
+
+    # BBC
+    ("BBC World", "https://feeds.bbci.co.uk/news/world/rss.xml"),
+    ("BBC Politics", "https://feeds.bbci.co.uk/news/politics/rss.xml"),
+
+    # Reuters
+    ("Reuters World", "https://feeds.reuters.com/Reuters/worldNews"),
+    ("Reuters Politics", "https://feeds.reuters.com/Reuters/politicsNews"),
+
+    # Associated Press
+    ("AP World", "https://apnews.com/rss/apf-worldnews"),
+    ("AP Politics", "https://apnews.com/rss/apf-politics"),
+
+    # Al Jazeera
+    ("Al Jazeera", "https://www.aljazeera.com/xml/rss/all.xml"),
+
+    # Deutsche Welle
+    ("DW World", "https://rss.dw.com/xml/rss-en-world")
+]
 
 
-# =======================
-# HELPERS
-# =======================
 def load_posted():
-    if os.path.exists(POSTED_FILE):
-        with open(POSTED_FILE, "r", encoding="utf-8") as f:
-            return set(json.load(f))
-    return set()
+    if not os.path.exists(POSTED_FILE):
+        return set()
+    with open(POSTED_FILE, "r", encoding="utf-8") as f:
+        return set(line.strip() for line in f.readlines())
 
 
-def save_posted(data):
+def save_posted(posted):
     with open(POSTED_FILE, "w", encoding="utf-8") as f:
-        json.dump(list(data), f)
+        for h in posted:
+            f.write(h + "\n")
 
 
-def hash_text(text: str) -> str:
+def hash_text(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def translate_to_ru(text: str) -> str:
-    response = client.responses.create(
-        model="gpt-4.1-mini",
-        input=f"Переведи на русский язык:\n\n{text}",
+def translate_to_ru(text):
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "Ты переводчик новостей. Переводи на чистый литературный русский."},
+            {"role": "user", "content": text}
+        ],
+        temperature=0.2
     )
-    return response.output_text.strip()
+    return response.choices[0].message.content.strip()
 
 
-def send_to_telegram(text: str):
+def send_to_telegram(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": CHANNEL_ID,
         "text": text,
-        "disable_web_page_preview": False,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": False
     }
-    r = requests.post(url, json=payload, timeout=30)
-    r.raise_for_status()
+    requests.post(url, json=payload, timeout=20)
 
 
-# =======================
-# MAIN
-# =======================
 def main():
     posted = load_posted()
-    sent = 0
+    sent_count = 0
 
-    for category, feed_url in RSS_FEEDS.items():
-        feed = feedparser.parse(feed_url)
+    for source_name, rss_url in RSS_SOURCES:
+        feed = feedparser.parse(rss_url)
 
-        for entry in feed.entries:
-            if sent >= MAX_POSTS:
-                break
-
-            title_en = entry.title
+        for entry in feed.entries[:3]:  # берем до 3 новостей с источника
+            title_en = entry.get("title", "")
             summary_en = entry.get("summary", "")
-            link = entry.link
+            link = entry.get("link", "")
 
             uid = hash_text(title_en + link)
             if uid in posted:
                 continue
 
-            try:
-                title_ru = translate_to_ru(title_en)
-                summary_ru = translate_to_ru(summary_en)
-            except Exception as e:
-                print("Translation error:", e)
-                continue
+            title_ru = translate_to_ru(title_en)
+            summary_ru = translate_to_ru(summary_en)
 
             message = (
-                f"🗞 НОВОСТИ СЕГО ДНЯ\n"
-                f"🌍 {category}\n\n"
-                f"{title_ru}\n\n"
+                f"<b>НОВОСТИ СЕГО ДНЯ</b>\n\n"
+                f"🌍 <b>{title_ru}</b>\n\n"
                 f"{summary_ru}\n\n"
                 f"🔗 {link}\n"
-                f"Источник: NY Times"
+                f"Источник: {source_name}"
             )
 
-            try:
-                send_to_telegram(message)
-                posted.add(uid)
-                sent += 1
-            except Exception as e:
-                print("Telegram error:", e)
+            send_to_telegram(message)
+            posted.add(uid)
+            sent_count += 1
+
+            if sent_count >= 10:
+                break
+
+        if sent_count >= 10:
+            break
 
     save_posted(posted)
 
