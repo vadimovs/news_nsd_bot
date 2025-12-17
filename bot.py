@@ -1,115 +1,115 @@
 import os
-import json
 import hashlib
+import json
 import requests
 import feedparser
-from pathlib import Path
 from openai import OpenAI
 
-# ================== НАСТРОЙКИ ==================
+# ================== ENV ==================
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+CHANNEL_ID = os.environ.get("CHANNEL_ID")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
-BOT_TOKEN = os.environ["BOT_TOKEN"]
-CHANNEL_ID = os.environ["CHANNEL_ID"]
-OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
+if not BOT_TOKEN or not CHANNEL_ID:
+    raise RuntimeError("BOT_TOKEN или CHANNEL_ID не заданы")
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+# OpenAI может быть временно недоступен — не валим бота
+client = None
+if OPENAI_API_KEY:
+    client = OpenAI(api_key=OPENAI_API_KEY)
 
-STATE_FILE = Path("posted.json")
+# ================== FILES ==================
+POSTED_FILE = "posted.json"
 
-RSS_FEEDS = {
-    "NY Times": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
-    "Reuters": "https://www.reutersagency.com/feed/?best-topics=world&post_type=best"
-}
+# ================== RSS ==================
+RSS_FEEDS = [
+    ("NY Times", "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"),
+    ("Reuters", "https://feeds.reuters.com/Reuters/worldNews"),
+]
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0"
-}
-
-# ================== ХРАНЕНИЕ СОСТОЯНИЯ ==================
-
+# ================== UTILS ==================
 def load_posted():
-    if STATE_FILE.exists():
-        return set(json.loads(STATE_FILE.read_text()))
+    if os.path.exists(POSTED_FILE):
+        with open(POSTED_FILE, "r") as f:
+            return set(json.load(f))
     return set()
 
-def save_posted(posted):
-    STATE_FILE.write_text(json.dumps(list(posted)))
+def save_posted(data):
+    with open(POSTED_FILE, "w") as f:
+        json.dump(list(data), f)
 
-def make_hash(text):
+def hash_item(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
-# ================== ПЕРЕВОД ==================
+# ================== TRANSLATION ==================
+def translate(text):
+    if not client:
+        return text  # fallback
 
-def translate_ru(text):
-    if not text:
-        return ""
     try:
         r = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {
                     "role": "system",
-                    "content": "Переведи текст на русский язык. Без пояснений, только перевод."
+                    "content": "Переведи текст на русский язык. Без добавлений."
                 },
-                {
-                    "role": "user",
-                    "content": text
-                }
+                {"role": "user", "content": text}
             ],
             temperature=0.2
         )
         return r.choices[0].message.content.strip()
-    except Exception as e:
-        print("Ошибка перевода:", e)
-        return text
+    except Exception:
+        return text  # не падаем
 
 # ================== TELEGRAM ==================
-
-def post_to_telegram(text):
+def send_to_telegram(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    data = {
+    payload = {
         "chat_id": CHANNEL_ID,
         "text": text,
-        "disable_web_page_preview": False
+        "disable_web_page_preview": False,
+        "parse_mode": "HTML"
     }
-    requests.post(url, data=data, timeout=15)
+    r = requests.post(url, json=payload, timeout=15)
+    r.raise_for_status()
 
-# ================== ОСНОВНАЯ ЛОГИКА ==================
-
+# ================== MAIN ==================
 def main():
     posted = load_posted()
+    new_posted = set(posted)
 
-    for source, rss_url in RSS_FEEDS.items():
-        try:
-            feed = feedparser.parse(rss_url)
-        except Exception as e:
-            print(f"Ошибка RSS {source}:", e)
-            continue
+    for source, url in RSS_FEEDS:
+        feed = feedparser.parse(url)
 
         for entry in feed.entries[:5]:
-            title_en = entry.get("title", "")
+            title = entry.get("title", "")
             link = entry.get("link", "")
-            summary_en = entry.get("summary", "")
+            summary = entry.get("summary", "")
 
-            uid = make_hash(title_en + link)
+            uid = hash_item(title + link)
             if uid in posted:
-                continue  # 🔁 уже публиковали
+                continue
 
-            title_ru = translate_ru(title_en)
-            summary_ru = translate_ru(summary_en)
+            title_ru = translate(title)
+            summary_ru = translate(summary)
 
             message = (
-                f"🇺🇦 / 🇺🇸 / 🇷🇺  Политика\n\n"
-                f"{title_ru}\n\n"
-                f"🔗 {link}\n\n"
+                f"<b>НОВОСТИ СЕГО ДНЯ</b>\n"
+                f"🌍 Политика\n\n"
+                f"<b>{title_ru}</b>\n\n"
+                f"{summary_ru}\n\n"
+                f"🔗 {link}\n"
                 f"Источник: {source}"
             )
 
-            post_to_telegram(message)
-            posted.add(uid)
-            save_posted(posted)
+            try:
+                send_to_telegram(message)
+                new_posted.add(uid)
+            except Exception as e:
+                print("Telegram error:", e)
 
-            return  # ⏱ публикуем только одну новость за запуск
+    save_posted(new_posted)
 
 if __name__ == "__main__":
     main()
