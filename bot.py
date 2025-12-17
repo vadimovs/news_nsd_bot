@@ -1,36 +1,63 @@
 import os
-import json
 import requests
-import feedparser
-from pathlib import Path
+import re
+import json
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
-CHANNEL_ID = os.environ["CHANNEL_ID"]
+CHANNEL_ID = int(os.environ["CHANNEL_ID"])
 
-RSS_FEEDS = [
-    ("NY Times", "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"),
-    ("Reuters", "https://feeds.reuters.com/Reuters/worldNews"),
-    ("BBC", "https://feeds.bbci.co.uk/news/world/rss.xml"),
+# RSS источники
+RSS_URLS = [
+    "https://feeds.reuters.com/Reuters/worldNews",
+    "https://feeds.bbci.co.uk/news/world/rss.xml"
 ]
 
 KEYWORDS = [
-    "ukraine", "russia", "war", "putin", "zelensky",
-    "nato", "europe", "usa", "united states"
+    "ukraine", "russia", "putin", "zelensky",
+    "trump", "war", "nato", "sanctions"
 ]
 
-STATE_FILE = Path("posted_links.json")
+STATE_FILE = "last_sent.json"
 
-# ---------- STATE ----------
 
-def load_posted():
-    if STATE_FILE.exists():
-        return set(json.loads(STATE_FILE.read_text()))
-    return set()
+def load_state():
+    try:
+        with open(STATE_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return {"sent": []}
 
-def save_posted(links):
-    STATE_FILE.write_text(json.dumps(list(links)))
 
-# ---------- TELEGRAM ----------
+def save_state(state):
+    with open(STATE_FILE, "w") as f:
+        json.dump(state, f)
+
+
+def translate_ru(text):
+    url = "https://translate.googleapis.com/translate_a/single"
+    params = {
+        "client": "gtx",
+        "sl": "en",
+        "tl": "ru",
+        "dt": "t",
+        "q": text
+    }
+    r = requests.get(url, params=params, timeout=10)
+    return "".join([x[0] for x in r.json()[0]])
+
+
+def fetch_news():
+    items = []
+    for rss in RSS_URLS:
+        r = requests.get(rss, timeout=15)
+        found = re.findall(
+            r"<item>.*?<title>(.*?)</title>.*?<link>(.*?)</link>",
+            r.text,
+            re.DOTALL
+        )
+        items.extend(found)
+    return items
+
 
 def post_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -41,38 +68,35 @@ def post_message(text):
     }
     requests.post(url, data=data)
 
-# ---------- MAIN ----------
 
 def main():
-    posted = load_posted()
+    state = load_state()
+    sent = set(state["sent"])
 
-    for source, feed_url in RSS_FEEDS:
-        feed = feedparser.parse(feed_url)
+    news = fetch_news()
 
-        for entry in feed.entries:
-            link = entry.get("link")
-            title = entry.get("title", "")
-            title_l = title.lower()
+    for title, link in news:
+        title_l = title.lower()
 
-            if not link or link in posted:
-                continue
+        if not any(k in title_l for k in KEYWORDS):
+            continue
 
-            if not any(k in title_l for k in KEYWORDS):
-                continue
+        uid = link.strip()
+        if uid in sent:
+            continue
 
-            text = (
-                f"🇺🇦 / 🇺🇸 / 🇷🇺 Политика\n\n"
-                f"{title}\n\n"
-                f"🔗 {link}\n\n"
-                f"Источник: {source}"
-            )
+        title_ru = translate_ru(title)
 
-            post_message(text)
+        text = f"📰 {title_ru}\n\n🔗 {link}"
+        post_message(text)
 
-            posted.add(link)
-            save_posted(posted)
+        sent.add(uid)
+        state["sent"] = list(sent)[-50:]  # храним последние 50
+        save_state(state)
+        return  # отправляем ТОЛЬКО ОДНУ новость
 
-            return  # 🔴 СТРОГО ОДНА НОВОСТЬ ЗА ЗАПУСК
+    print("No new news")
+
 
 if __name__ == "__main__":
     main()
