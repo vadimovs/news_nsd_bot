@@ -1,76 +1,81 @@
 import os
 import requests
-import re
+import feedparser
+from openai import OpenAI
 
+# ====== ENV ======
 BOT_TOKEN = os.environ["BOT_TOKEN"]
-CHANNEL_ID = int(os.environ["CHANNEL_ID"])
+CHANNEL_ID = os.environ["CHANNEL_ID"]
+OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 
-RSS_SOURCES = [
-    "https://feeds.reuters.com/Reuters/worldNews",
-    "https://feeds.bbci.co.uk/news/world/rss.xml"
+client = OpenAI(api_key=OPENAI_API_KEY)
+
+# ====== НАСТРОЙКИ ======
+KEYWORDS = [
+    "trump", "donald trump", "трамп",
+    "putin", "путин",
+    "zelensky", "zelenskyy", "зеленский"
 ]
 
-# ❗ ТОЛЬКО ЭТИ ЛЮДИ
-PERSONS = [
-    "trump", "donald trump",
-    "zelensky", "zelenskyy",
-    "putin", "vladimir putin"
+RSS_FEEDS = [
+    "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
+    "https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml",
+    "https://feeds.bbci.co.uk/news/world/rss.xml",
+    "https://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml"
 ]
 
-# файл для дедупликации
-POSTED_FILE = "posted.txt"
-
-
-def load_posted():
-    if not os.path.exists(POSTED_FILE):
-        return set()
-    with open(POSTED_FILE, "r") as f:
-        return set(f.read().splitlines())
-
-
-def save_posted(link):
-    with open(POSTED_FILE, "a") as f:
-        f.write(link + "\n")
-
-
-def post_message(text):
+# ====== TELEGRAM ======
+def send_to_telegram(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    data = {
+    payload = {
         "chat_id": CHANNEL_ID,
         "text": text,
+        "parse_mode": "HTML",
         "disable_web_page_preview": False
     }
-    requests.post(url, data=data)
+    requests.post(url, json=payload, timeout=20)
 
+# ====== OPENAI ======
+def translate_and_summarize(text):
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "Ты новостной редактор. Переведи на русский и кратко перескажи."},
+            {"role": "user", "content": text}
+        ],
+        temperature=0.3
+    )
+    return resp.choices[0].message.content.strip()
 
-def fetch_news():
-    posted = load_posted()
+# ====== MAIN ======
+def main():
+    for feed_url in RSS_FEEDS:
+        feed = feedparser.parse(feed_url)
 
-    for rss in RSS_SOURCES:
-        r = requests.get(rss, timeout=15)
-        items = re.findall(
-            r"<item>.*?<title>(.*?)</title>.*?<link>(.*?)</link>",
-            r.text,
-            re.DOTALL
-        )
+        for entry in feed.entries[:5]:
+            title = entry.get("title", "")
+            summary = entry.get("summary", "")
+            link = entry.get("link", "")
 
-        for title, link in items:
-            title_low = title.lower()
+            text_all = f"{title} {summary}".lower()
 
-            # 🔥 ФИЛЬТР ТОЛЬКО ПО ИМЕНАМ
-            if not any(name in title_low for name in PERSONS):
+            if not any(k in text_all for k in KEYWORDS):
                 continue
 
-            if link in posted:
-                continue
+            ru_text = translate_and_summarize(f"{title}\n\n{summary}")
 
-            text = f"📰 {title}\n\n🔗 {link}"
-            post_message(text)
-            save_posted(link)
-            return  # ⛔️ ТОЛЬКО ОДНА НОВОСТЬ ЗА ЗАПУСК
+            message = (
+                "🗞 <b>НОВОСТИ СЕГО ДНЯ</b>\n"
+                "🌍 <b>Политика</b>\n\n"
+                f"<b>{ru_text}</b>\n\n"
+                f"🔗 {link}\n"
+                f"Источник: {feed.feed.get('title', 'Источник')}"
+            )
 
-    print("No matching news found")
+            send_to_telegram(message)
+            return  # ❗️ ОДНА новость за запуск
 
+    print("Подходящих новостей не найдено")
 
 if __name__ == "__main__":
-    fetch_news()
+    main()
