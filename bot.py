@@ -13,14 +13,17 @@ KEYWORDS = [
     "nato", "europe", "sanctions"
 ]
 
-STATE_FILE = "last_link.json"
+STATE_FILE = "last.json"
 
 
 def load_last_link():
     if not os.path.exists(STATE_FILE):
         return None
-    with open(STATE_FILE, "r") as f:
-        return json.load(f).get("link")
+    try:
+        with open(STATE_FILE, "r") as f:
+            return json.load(f).get("link")
+    except:
+        return None
 
 
 def save_last_link(link):
@@ -50,7 +53,7 @@ def main():
         link = entry.link
         title_l = title.lower()
 
-        if link == last_link:
+        if last_link == link:
             return  # уже публиковали
 
         if any(word in title_l for word in KEYWORDS):
