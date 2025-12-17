@@ -2,78 +2,77 @@ import os
 import json
 import requests
 import feedparser
+from pathlib import Path
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHANNEL_ID = os.environ["CHANNEL_ID"]
 
-RSS_URL = "https://rss.nytimes.com/services/xml/rss/nyt/Europe.xml"
-STATE_FILE = "last_link.json"
+RSS_FEEDS = [
+    ("NY Times", "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"),
+    ("Reuters", "https://feeds.reuters.com/Reuters/worldNews"),
+    ("BBC", "https://feeds.bbci.co.uk/news/world/rss.xml"),
+]
 
 KEYWORDS = [
     "ukraine", "russia", "war", "putin", "zelensky",
-    "europe", "nato", "sanctions"
+    "nato", "europe", "usa", "united states"
 ]
 
-def load_last_link():
-    if not os.path.exists(STATE_FILE):
-        return None
-    with open(STATE_FILE, "r") as f:
-        return json.load(f).get("link")
+STATE_FILE = Path("posted_links.json")
 
-def save_last_link(link):
-    with open(STATE_FILE, "w") as f:
-        json.dump({"link": link}, f)
+# ---------- STATE ----------
 
-def translate_to_ru(text: str) -> str:
-    url = "https://translate.googleapis.com/translate_a/single"
-    params = {
-        "client": "gtx",
-        "sl": "en",
-        "tl": "ru",
-        "dt": "t",
-        "q": text
-    }
-    r = requests.get(url, params=params)
-    return "".join([i[0] for i in r.json()[0]])
+def load_posted():
+    if STATE_FILE.exists():
+        return set(json.loads(STATE_FILE.read_text()))
+    return set()
 
-def post_message(text: str):
+def save_posted(links):
+    STATE_FILE.write_text(json.dumps(list(links)))
+
+# ---------- TELEGRAM ----------
+
+def post_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     data = {
         "chat_id": CHANNEL_ID,
         "text": text,
-        "parse_mode": "HTML",
         "disable_web_page_preview": False
     }
     requests.post(url, data=data)
 
+# ---------- MAIN ----------
+
 def main():
-    feed = feedparser.parse(RSS_URL)
-    if not feed.entries:
-        return
+    posted = load_posted()
 
-    last_link = load_last_link()
+    for source, feed_url in RSS_FEEDS:
+        feed = feedparser.parse(feed_url)
 
-    for entry in feed.entries:
-        title = entry.title
-        link = entry.link
-        title_l = title.lower()
+        for entry in feed.entries:
+            link = entry.get("link")
+            title = entry.get("title", "")
+            title_l = title.lower()
 
-        if last_link == link:
-            return
+            if not link or link in posted:
+                continue
 
-        if any(word in title_l for word in KEYWORDS):
-            title_ru = translate_to_ru(title)
+            if not any(k in title_l for k in KEYWORDS):
+                continue
 
             text = (
-                "🇺🇦 / 🇺🇸 / 🇷🇺 <b>Политика</b>\n\n"
-                f"<b>{title_ru}</b>\n\n"
+                f"🇺🇦 / 🇺🇸 / 🇷🇺 Политика\n\n"
+                f"{title}\n\n"
                 f"🔗 {link}\n\n"
-                "Источник: <i>NY Times</i>"
+                f"Источник: {source}"
             )
 
             post_message(text)
-            save_last_link(link)
-            return
+
+            posted.add(link)
+            save_posted(posted)
+
+            return  # 🔴 СТРОГО ОДНА НОВОСТЬ ЗА ЗАПУСК
 
 if __name__ == "__main__":
     main()
