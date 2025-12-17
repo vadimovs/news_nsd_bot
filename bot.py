@@ -1,115 +1,98 @@
 import os
 import hashlib
 import json
+import time
 import requests
 import feedparser
 from openai import OpenAI
 
-# ================== ENV ==================
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-CHANNEL_ID = os.environ.get("CHANNEL_ID")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+# ====== ENV ======
+BOT_TOKEN = os.environ["BOT_TOKEN"]
+CHANNEL_ID = os.environ["CHANNEL_ID"]
+OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 
-if not BOT_TOKEN or not CHANNEL_ID:
-    raise RuntimeError("BOT_TOKEN или CHANNEL_ID не заданы")
+client = OpenAI(api_key=OPENAI_API_KEY)
 
-# OpenAI может быть временно недоступен — не валим бота
-client = None
-if OPENAI_API_KEY:
-    client = OpenAI(api_key=OPENAI_API_KEY)
+# ====== FILES ======
+POSTED_FILE = "posted_hashes.json"
 
-# ================== FILES ==================
-POSTED_FILE = "posted.json"
+if not os.path.exists(POSTED_FILE):
+    with open(POSTED_FILE, "w") as f:
+        json.dump([], f)
 
-# ================== RSS ==================
-RSS_FEEDS = [
-    ("NY Times", "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"),
-    ("Reuters", "https://feeds.reuters.com/Reuters/worldNews"),
+with open(POSTED_FILE, "r") as f:
+    POSTED_HASHES = set(json.load(f))
+
+# ====== FEEDS ======
+FEEDS = [
+    "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
+    "https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml",
+    "https://feeds.bbci.co.uk/news/world/rss.xml",
+    "https://feeds.reuters.com/reuters/worldNews",
 ]
 
-# ================== UTILS ==================
-def load_posted():
-    if os.path.exists(POSTED_FILE):
-        with open(POSTED_FILE, "r") as f:
-            return set(json.load(f))
-    return set()
-
-def save_posted(data):
-    with open(POSTED_FILE, "w") as f:
-        json.dump(list(data), f)
-
-def hash_item(text):
+# ====== HELPERS ======
+def sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
-# ================== TRANSLATION ==================
-def translate(text):
-    if not client:
-        return text  # fallback
+def translate_ru(text: str) -> str:
+    if not text:
+        return ""
+    r = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "Переведи текст на русский язык, без добавлений."},
+            {"role": "user", "content": text}
+        ],
+        temperature=0
+    )
+    return r.choices[0].message.content.strip()
 
-    try:
-        r = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "Переведи текст на русский язык. Без добавлений."
-                },
-                {"role": "user", "content": text}
-            ],
-            temperature=0.2
-        )
-        return r.choices[0].message.content.strip()
-    except Exception:
-        return text  # не падаем
-
-# ================== TELEGRAM ==================
-def send_to_telegram(text):
+def send_telegram(text: str):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": CHANNEL_ID,
         "text": text,
-        "disable_web_page_preview": False,
-        "parse_mode": "HTML"
+        "parse_mode": "HTML",
+        "disable_web_page_preview": False
     }
-    r = requests.post(url, json=payload, timeout=15)
-    r.raise_for_status()
+    requests.post(url, json=payload, timeout=20)
 
-# ================== MAIN ==================
-def main():
-    posted = load_posted()
-    new_posted = set(posted)
+# ====== MAIN ======
+new_hashes = set()
 
-    for source, url in RSS_FEEDS:
-        feed = feedparser.parse(url)
+for feed_url in FEEDS:
+    feed = feedparser.parse(feed_url)
 
-        for entry in feed.entries[:5]:
-            title = entry.get("title", "")
-            link = entry.get("link", "")
-            summary = entry.get("summary", "")
+    for entry in feed.entries[:5]:
+        title_en = entry.get("title", "")
+        summary_en = entry.get("summary", "")
+        link = entry.get("link", "")
+        source = feed.feed.get("title", "Источник")
 
-            uid = hash_item(title + link)
-            if uid in posted:
-                continue
+        uniq = sha(title_en + link)
+        if uniq in POSTED_HASHES or uniq in new_hashes:
+            continue
 
-            title_ru = translate(title)
-            summary_ru = translate(summary)
+        title_ru = translate_ru(title_en)
+        summary_ru = translate_ru(summary_en)
 
-            message = (
-                f"<b>НОВОСТИ СЕГО ДНЯ</b>\n"
-                f"🌍 Политика\n\n"
-                f"<b>{title_ru}</b>\n\n"
-                f"{summary_ru}\n\n"
-                f"🔗 {link}\n"
-                f"Источник: {source}"
-            )
+        message = (
+            f"<b>НОВОСТИ СЕГО ДНЯ</b>\n\n"
+            f"<b>{title_ru}</b>\n\n"
+            f"{summary_ru}\n\n"
+            f"🔗 {link}\n"
+            f"Источник: {source}"
+        )
 
-            try:
-                send_to_telegram(message)
-                new_posted.add(uid)
-            except Exception as e:
-                print("Telegram error:", e)
+        send_telegram(message)
+        new_hashes.add(uniq)
 
-    save_posted(new_posted)
+        time.sleep(2)
 
-if __name__ == "__main__":
-    main()
+# ====== SAVE ======
+POSTED_HASHES.update(new_hashes)
+with open(POSTED_FILE, "w") as f:
+    json.dump(list(POSTED_HASHES), f)
+
+print(f"Опубликовано новых новостей: {len(new_hashes)}")
