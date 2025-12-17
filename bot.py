@@ -7,12 +7,12 @@ BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHANNEL_ID = os.environ["CHANNEL_ID"]
 
 RSS_URL = "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"
+STATE_FILE = "last_link.json"
 
 KEYWORDS = [
-    "Ukraine", "Russia", "war", "Putin", "Zelensky", "NATO", "sanctions"
+    "ukraine", "russia", "war", "putin", "zelensky",
+    "nato", "europe", "sanctions", "election"
 ]
-
-STATE_FILE = "last_post.json"
 
 
 def load_last_link():
@@ -32,7 +32,7 @@ def post_message(text):
     data = {
         "chat_id": CHANNEL_ID,
         "text": text,
-        "disable_web_page_preview": True
+        "disable_web_page_preview": False  # ⬅️ КАРТОЧКА ВКЛЮЧЕНА
     }
     requests.post(url, data=data)
 
@@ -49,11 +49,11 @@ def main():
         link = entry.link
         title_l = title.lower()
 
-        if link == last_link:
+        if last_link == link:
             return  # уже публиковали
 
-        if any(word.lower() in title_l for word in KEYWORDS):
-            text = f"📰 {title}\n\n🔗 {link}"
+        if any(word in title_l for word in KEYWORDS):
+            text = f"📰 {title}\n\n{link}"
             post_message(text)
             save_last_link(link)
             return
