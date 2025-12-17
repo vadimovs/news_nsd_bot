@@ -1,5 +1,4 @@
 import os
-import json
 import requests
 import feedparser
 
@@ -10,58 +9,54 @@ RSS_URL = "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"
 
 KEYWORDS = [
     "ukraine", "russia", "war", "putin", "zelensky",
-    "nato", "europe", "sanctions"
+    "nato", "europe", "u.s.", "usa"
 ]
 
-STATE_FILE = "last.json"
+TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
+def get_last_channel_message():
+    url = f"{TELEGRAM_API}/getUpdates"
+    r = requests.get(url, timeout=15)
+    data = r.json()
 
-def load_last_link():
-    if not os.path.exists(STATE_FILE):
-        return None
-    try:
-        with open(STATE_FILE, "r") as f:
-            return json.load(f).get("link")
-    except:
-        return None
+    if not data.get("result"):
+        return ""
 
+    texts = []
+    for item in data["result"]:
+        msg = item.get("channel_post") or item.get("message")
+        if msg and msg.get("chat", {}).get("id") == int(CHANNEL_ID):
+            texts.append(msg.get("text", ""))
 
-def save_last_link(link):
-    with open(STATE_FILE, "w") as f:
-        json.dump({"link": link}, f)
-
+    return texts[-1] if texts else ""
 
 def post_message(text):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    url = f"{TELEGRAM_API}/sendMessage"
     data = {
         "chat_id": CHANNEL_ID,
         "text": text,
-        "disable_web_page_preview": False
+        "disable_web_page_preview": False  # КАРТОЧКИ ВКЛЮЧЕНЫ
     }
-    requests.post(url, data=data)
-
+    requests.post(url, data=data, timeout=15)
 
 def main():
     feed = feedparser.parse(RSS_URL)
     if not feed.entries:
         return
 
-    last_link = load_last_link()
+    last_post = get_last_channel_message().lower()
 
-    for entry in feed.entries:
-        title = entry.title
-        link = entry.link
-        title_l = title.lower()
+    entry = feed.entries[0]  # БЕРЁМ ТОЛЬКО САМУЮ НОВУЮ
+    title = entry.title
+    link = entry.link
+    title_l = title.lower()
 
-        if last_link == link:
-            return  # уже публиковали
+    if title_l in last_post:
+        return  # УЖЕ БЫЛО
 
-        if any(word in title_l for word in KEYWORDS):
-            text = f"📰 {title}\n\n🔗 {link}"
-            post_message(text)
-            save_last_link(link)
-            return
-
+    if any(word in title_l for word in KEYWORDS):
+        text = f"📰 {title}\n\n🔗 {link}"
+        post_message(text)
 
 if __name__ == "__main__":
     main()
