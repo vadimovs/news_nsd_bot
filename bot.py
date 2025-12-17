@@ -9,9 +9,7 @@ CHANNEL_ID = os.environ["CHANNEL_ID"]
 RSS_URL = "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"
 
 KEYWORDS = [
-    "Ukraine", "Russia", "U.S.", "USA", "NATO",
-    "president", "election", "sanctions",
-    "war", "Putin", "Zelensky"
+    "Ukraine", "Russia", "war", "Putin", "Zelensky", "NATO", "sanctions"
 ]
 
 STATE_FILE = "last_post.json"
@@ -34,7 +32,7 @@ def post_message(text):
     data = {
         "chat_id": CHANNEL_ID,
         "text": text,
-        "disable_web_page_preview": False
+        "disable_web_page_preview": True
     }
     requests.post(url, data=data)
 
