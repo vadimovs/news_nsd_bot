@@ -6,10 +6,13 @@ import feedparser
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHANNEL_ID = os.environ["CHANNEL_ID"]
 
-RSS_URL = "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"
-STATE_FILE = "last.json"
+RSS_URL = "https://rss.nytimes.com/services/xml/rss/nyt/Europe.xml"
+STATE_FILE = "last_link.json"
 
-# ====== ВСПОМОГАТЕЛЬНОЕ ======
+KEYWORDS = [
+    "ukraine", "russia", "war", "putin", "zelensky",
+    "europe", "nato", "sanctions"
+]
 
 def load_last_link():
     if not os.path.exists(STATE_FILE):
@@ -22,29 +25,26 @@ def save_last_link(link):
         json.dump({"link": link}, f)
 
 def translate_to_ru(text: str) -> str:
-    url = "https://libretranslate.de/translate"
-    data = {
-        "q": text,
-        "source": "en",
-        "target": "ru",
-        "format": "text"
+    url = "https://translate.googleapis.com/translate_a/single"
+    params = {
+        "client": "gtx",
+        "sl": "en",
+        "tl": "ru",
+        "dt": "t",
+        "q": text
     }
-    try:
-        r = requests.post(url, data=data, timeout=15)
-        return r.json()["translatedText"]
-    except Exception:
-        return text  # если переводчик упал — шлём как есть
+    r = requests.get(url, params=params)
+    return "".join([i[0] for i in r.json()[0]])
 
 def post_message(text: str):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     data = {
         "chat_id": CHANNEL_ID,
         "text": text,
-        "disable_web_page_preview": False  # КАРТОЧКА ВКЛЮЧЕНА
+        "parse_mode": "HTML",
+        "disable_web_page_preview": False
     }
     requests.post(url, data=data)
-
-# ====== ОСНОВНАЯ ЛОГИКА ======
 
 def main():
     feed = feedparser.parse(RSS_URL)
@@ -54,22 +54,26 @@ def main():
     last_link = load_last_link()
 
     for entry in feed.entries:
-        title_en = entry.title
+        title = entry.title
         link = entry.link
+        title_l = title.lower()
 
-        if link == last_link:
-            return  # уже публиковали
+        if last_link == link:
+            return
 
-        title_ru = translate_to_ru(title_en)
+        if any(word in title_l for word in KEYWORDS):
+            title_ru = translate_to_ru(title)
 
-        text = (
-            f"📰 {title_ru}\n\n"
-            f"🔗 {link}"
-        )
+            text = (
+                "🇺🇦 / 🇺🇸 / 🇷🇺 <b>Политика</b>\n\n"
+                f"<b>{title_ru}</b>\n\n"
+                f"🔗 {link}\n\n"
+                "Источник: <i>NY Times</i>"
+            )
 
-        post_message(text)
-        save_last_link(link)
-        return
+            post_message(text)
+            save_last_link(link)
+            return
 
 if __name__ == "__main__":
     main()
