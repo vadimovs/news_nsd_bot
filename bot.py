@@ -1,4 +1,5 @@
 import os
+import json
 import requests
 import feedparser
 
@@ -9,8 +10,23 @@ RSS_URL = "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"
 
 KEYWORDS = [
     "ukraine", "russia", "war", "putin", "zelensky",
-    "nato", "sanctions", "europe"
+    "europe", "nato", "sanctions"
 ]
+
+STATE_FILE = "last_link.json"
+
+
+def load_last_link():
+    if not os.path.exists(STATE_FILE):
+        return None
+    with open(STATE_FILE, "r") as f:
+        return json.load(f).get("link")
+
+
+def save_last_link(link):
+    with open(STATE_FILE, "w") as f:
+        json.dump({"link": link}, f)
+
 
 def post_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -21,21 +37,28 @@ def post_message(text):
     }
     requests.post(url, data=data)
 
+
 def main():
     feed = feedparser.parse(RSS_URL)
     if not feed.entries:
         return
 
-    entry = feed.entries[0]  # 🔥 ВСЕГДА ТОЛЬКО САМАЯ НОВАЯ
-    title = entry.title
-    link = entry.link
+    last_link = load_last_link()
 
-    title_l = title.lower()
-    if not any(word in title_l for word in KEYWORDS):
-        return
+    for entry in feed.entries:
+        title = entry.title
+        link = entry.link
+        title_l = title.lower()
 
-    text = f"📰 {title}\n\n🔗 {link}"
-    post_message(text)
+        if link == last_link:
+            return  # уже публиковали
+
+        if any(word in title_l for word in KEYWORDS):
+            text = f"📰 {title}\n\n🔗 {link}"
+            post_message(text)
+            save_last_link(link)
+            return
+
 
 if __name__ == "__main__":
     main()
