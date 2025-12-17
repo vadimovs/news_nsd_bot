@@ -1,46 +1,39 @@
 import os
-import json
 import hashlib
-import requests
 import feedparser
+import requests
 from openai import OpenAI
 
-# ======================
-# ENV
-# ======================
+# ========= НАСТРОЙКИ =========
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHANNEL_ID = os.environ["CHANNEL_ID"]
 OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 
-client = OpenAI(api_key=OPENAI_API_KEY)
-
-# ======================
-# FILE FOR DEDUPLICATION
-# ======================
-POSTED_FILE = "posted.json"
-
-if os.path.exists(POSTED_FILE):
-    with open(POSTED_FILE, "r", encoding="utf-8") as f:
-        posted = set(json.load(f))
-else:
-    posted = set()
-
-# ======================
-# RSS SOURCES
-# ======================
 RSS_FEEDS = [
-    ("NY Times", "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"),
-    ("Reuters", "https://feeds.reuters.com/Reuters/worldNews"),
-    ("BBC", "https://feeds.bbci.co.uk/news/world/rss.xml"),
+    "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
 ]
 
-# ======================
-# FUNCTIONS
-# ======================
+POSTED_FILE = "posted.txt"
+
+# ========= OPENAI =========
+client = OpenAI(api_key=OPENAI_API_KEY)
+
+# ========= ВСПОМОГАТЕЛЬНОЕ =========
+def load_posted():
+    if not os.path.exists(POSTED_FILE):
+        return set()
+    with open(POSTED_FILE, "r", encoding="utf-8") as f:
+        return set(line.strip() for line in f.readlines())
+
+def save_posted(posted):
+    with open(POSTED_FILE, "w", encoding="utf-8") as f:
+        for p in posted:
+            f.write(p + "\n")
+
 def hash_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
-
+# ========= ПЕРЕВОД =========
 def translate_to_ru(text: str) -> str:
     if not text.strip():
         return text
@@ -50,11 +43,11 @@ def translate_to_ru(text: str) -> str:
         messages=[
             {
                 "role": "system",
-                "content": "Ты профессиональный новостной переводчик. Переводи точно, без добавлений."
+                "content": "Translate the following text into Russian. Preserve meaning, do not add commentary."
             },
             {
                 "role": "user",
-                "content": f"Переведи на русский:\n\n{text}"
+                "content": text
             }
         ],
         temperature=0.2,
@@ -62,7 +55,7 @@ def translate_to_ru(text: str) -> str:
 
     return response.choices[0].message.content.strip()
 
-
+# ========= TELEGRAM =========
 def send_to_telegram(text: str):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
@@ -71,47 +64,42 @@ def send_to_telegram(text: str):
         "parse_mode": "HTML",
         "disable_web_page_preview": False,
     }
-    requests.post(url, json=payload, timeout=20)
+    r = requests.post(url, json=payload, timeout=30)
+    r.raise_for_status()
 
+# ========= ОСНОВНАЯ ЛОГИКА =========
+def main():
+    posted = load_posted()
 
-# ======================
-# MAIN
-# ======================
-new_posts = []
+    for feed_url in RSS_FEEDS:
+        feed = feedparser.parse(feed_url)
 
-for source_name, feed_url in RSS_FEEDS:
-    feed = feedparser.parse(feed_url)
+        for entry in feed.entries[:5]:
+            title_en = entry.get("title", "")
+            summary_en = entry.get("summary", "")
+            link = entry.get("link", "")
 
-    for entry in feed.entries[:5]:
-        title_en = entry.get("title", "")
-        desc_en = entry.get("summary", "")
-        link = entry.get("link", "")
+            unique_hash = hash_text(title_en + link)
 
-        uid = hash_text(title_en + link)
-        if uid in posted:
-            continue
+            if unique_hash in posted:
+                continue
 
-        title_ru = translate_to_ru(title_en)
-        desc_ru = translate_to_ru(desc_en)
+            title_ru = translate_to_ru(title_en)
+            summary_ru = translate_to_ru(summary_en)
 
-        message = (
-            "📰 <b>НОВОСТИ СЕГО ДНЯ</b>\n"
-            "🌍 <b>Политика</b>\n\n"
-            f"<b>{title_ru}</b>\n\n"
-            f"{desc_ru}\n\n"
-            f"🔗 <a href='{link}'>Читать полностью</a>\n"
-            f"Источник: {source_name}"
-        )
+            message = (
+                "📰 <b>НОВОСТИ СЕГО ДНЯ</b>\n\n"
+                f"<b>{title_ru}</b>\n\n"
+                f"{summary_ru}\n\n"
+                f"🔗 {link}\n\n"
+                "Источник: NY Times"
+            )
 
-        send_to_telegram(message)
+            send_to_telegram(message)
+            posted.add(unique_hash)
 
-        posted.add(uid)
-        new_posts.append(uid)
+    save_posted(posted)
 
-# ======================
-# SAVE DEDUP STATE
-# ======================
-with open(POSTED_FILE, "w", encoding="utf-8") as f:
-    json.dump(list(posted), f, ensure_ascii=False)
-
-print(f"Posted {len(new_posts)} new items")
+# ========= ЗАПУСК =========
+if __name__ == "__main__":
+    main()
