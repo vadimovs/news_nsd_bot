@@ -25,5 +25,5 @@ jobs:
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
-        run: |
-          python bot.py
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: python bot.py
