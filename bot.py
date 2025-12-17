@@ -1,41 +1,48 @@
 import os
 import requests
-import feedparser
+import re
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
-CHANNEL_ID = os.environ["CHANNEL_ID"]
+CHANNEL_ID = int(os.environ["CHANNEL_ID"])
 
 RSS_URL = "https://feeds.reuters.com/Reuters/worldNews"
 
 KEYWORDS = [
-    "ukraine", "russia", "war", "president",
-    "election", "putin", "zelensky", "trump",
-    "nato", "sanctions"
+    "ukraine", "russia", "u.s.", "usa", "nato",
+    "president", "election", "sanctions",
+    "war", "putin", "zelensky", "trump"
 ]
 
 
-def get_latest_news():
-    feed = feedparser.parse(RSS_URL)
-
-    if not feed.entries:
-        return None
-
-    for entry in feed.entries:
-        title = entry.title.lower()
-        if any(word in title for word in KEYWORDS):
-            return f"📰 {entry.title}\n\n🔗 {entry.link}"
-
-    return None
-
-
-def post_message(text):
+def post_message(text: str):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     data = {
         "chat_id": CHANNEL_ID,
         "text": text,
         "disable_web_page_preview": True
     }
-    requests.post(url, data=data)
+    r = requests.post(url, data=data)
+    print("Telegram response:", r.text)
+
+
+def get_latest_news():
+    resp = requests.get(RSS_URL, timeout=15)
+    if resp.status_code != 200:
+        return None
+
+    items = re.findall(
+        r"<item>.*?<title>(.*?)</title>.*?<link>(.*?)</link>",
+        resp.text,
+        re.DOTALL
+    )
+
+    for title, link in items:
+        title_lower = title.lower()
+        for kw in KEYWORDS:
+            if kw in title_lower:
+                return f"📰 {title}\n\n🔗 {link}"
+
+    return None
 
 
 def main():
