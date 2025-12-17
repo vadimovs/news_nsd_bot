@@ -10,10 +10,10 @@ RSS_URL = "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"
 
 KEYWORDS = [
     "ukraine", "russia", "war", "putin", "zelensky",
-    "europe", "nato", "sanctions"
+    "nato", "europe", "sanctions"
 ]
 
-STATE_FILE = "last_link.json"
+STATE_FILE = "state.json"
 
 
 def load_last_link():
@@ -28,7 +28,19 @@ def save_last_link(link):
         json.dump({"link": link}, f)
 
 
-def post_message(text):
+def translate_to_ru(text: str) -> str:
+    url = "https://libretranslate.de/translate"
+    data = {
+        "q": text,
+        "source": "en",
+        "target": "ru",
+        "format": "text"
+    }
+    r = requests.post(url, data=data, timeout=15)
+    return r.json().get("translatedText", text)
+
+
+def post_message(text: str):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     data = {
         "chat_id": CHANNEL_ID,
@@ -50,14 +62,22 @@ def main():
         link = entry.link
         title_l = title.lower()
 
-        if link == last_link:
-            return  # уже публиковали
-
-        if any(word in title_l for word in KEYWORDS):
-            text = f"📰 {title}\n\n🔗 {link}"
-            post_message(text)
-            save_last_link(link)
+        if last_link == link:
             return
+
+        if not any(k in title_l for k in KEYWORDS):
+            continue
+
+        title_ru = translate_to_ru(title)
+
+        text = (
+            f"📰 {title_ru}\n\n"
+            f"🔗 {link}"
+        )
+
+        post_message(text)
+        save_last_link(link)
+        return
 
 
 if __name__ == "__main__":
