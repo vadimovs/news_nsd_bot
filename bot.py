@@ -5,54 +5,64 @@ import feedparser
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHANNEL_ID = os.environ["CHANNEL_ID"]
 
-YOUTUBE_CHANNELS = [
-    "https://www.youtube.com/feeds/videos.xml?channel_id=UCgtxz5_xa6xkDTghNPkuRYw",  # канал 1
-    "https://www.youtube.com/feeds/videos.xml?channel_id=UCxxxxxxxxxxxxxxxxx",     # Тарас (вставь ID)
-    "https://www.youtube.com/feeds/videos.xml?channel_id=UCyyyyyyyyyyyyyyyyy"      # 1day_news
-]
-
 LAST_FILE = "last_video.txt"
 
+YOUTUBE_CHANNELS = {
+    "Taras_Lawyer": "https://www.youtube.com/feeds/videos.xml?channel_id=UCgtxz5_xa6xkDTghNPkuRYw",
+    "Znai_Pravdu": "https://www.youtube.com/feeds/videos.xml?channel_id=UCYwVw5wqvQzjJ9X0lL5PZ0Q",
+    "1Day_News": "https://www.youtube.com/feeds/videos.xml?channel_id=UCxvQ4kXzF7n6w7N2x4ZcYkA"
+}
 
-def read_last():
-    try:
-        with open(LAST_FILE, "r") as f:
-            return f.read().strip()
-    except:
-        return "EMPTY"
+def load_last_ids():
+    if not os.path.exists(LAST_FILE):
+        return {}
+    data = {}
+    with open(LAST_FILE, "r", encoding="utf-8") as f:
+        for line in f:
+            if "|" in line:
+                k, v = line.strip().split("|", 1)
+                data[k] = v
+    return data
 
+def save_last_ids(data):
+    with open(LAST_FILE, "w", encoding="utf-8") as f:
+        for k, v in data.items():
+            f.write(f"{k}|{v}\n")
 
-def write_last(video_id):
-    with open(LAST_FILE, "w") as f:
-        f.write(video_id)
-
-
-def send(msg):
-    requests.post(
-        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-        data={"chat_id": CHANNEL_ID, "text": msg}
-    )
-
+def send_message(text):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    requests.post(url, data={
+        "chat_id": CHANNEL_ID,
+        "text": text,
+        "disable_web_page_preview": False
+    })
 
 def main():
-    last_id = read_last()
+    last_ids = load_last_ids()
+    updated = False
 
-    for feed_url in YOUTUBE_CHANNELS:
+    for name, feed_url in YOUTUBE_CHANNELS.items():
         feed = feedparser.parse(feed_url)
         if not feed.entries:
             continue
 
-        entry = feed.entries[0]
-        video_id = entry.id
+        latest = feed.entries[0]
+        video_id = latest.id
 
-        if video_id == last_id:
+        if last_ids.get(name) == video_id:
             continue
 
-        text = f"📺 Новое видео:\n{entry.title}\n{entry.link}"
-        send(text)
-        write_last(video_id)
-        break
+        title = latest.title
+        link = latest.link
 
+        message = f"📺 {name}\n\n{title}\n\n{link}"
+        send_message(message)
+
+        last_ids[name] = video_id
+        updated = True
+
+    if updated:
+        save_last_ids(last_ids)
 
 if __name__ == "__main__":
     main()
