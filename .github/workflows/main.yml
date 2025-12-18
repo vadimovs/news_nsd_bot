@@ -3,7 +3,7 @@ name: Telegram News Bot
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/15 * * * *"   # каждые 15 минут
+    - cron: "*/10 * * * *"   # каждые 10 минут
 
 jobs:
   run-bot:
@@ -19,7 +19,8 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
 
       - name: Run bot
         env:
@@ -28,4 +29,5 @@ jobs:
           LAST_TARAS: ${{ secrets.LAST_TARAS }}
           LAST_ZNAI: ${{ secrets.LAST_ZNAI }}
           LAST_1DAY: ${{ secrets.LAST_1DAY }}
-        run: python bot.py
+        run: |
+          python bot.py
