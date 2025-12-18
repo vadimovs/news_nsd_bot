@@ -5,66 +5,42 @@ import feedparser
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHANNEL_ID = os.environ["CHANNEL_ID"]
 
+# ===== YouTube RSS (3 канала) =====
 CHANNELS = {
-    "Taras Lawyer": {
-        "feed": "https://www.youtube.com/feeds/videos.xml?channel_id=UCgtxz5_xa6xkDTghNPkuRYw",
-        "file": "last_taras.txt",
-    },
-    "Знай Правду": {
-        "feed": "https://www.youtube.com/feeds/videos.xml?channel_id=UCxxxxxxxxxxxxxxxxxxx",
-        "file": "last_znai.txt",
-    },
-    "1 Day News": {
-        "feed": "https://www.youtube.com/feeds/videos.xml?channel_id=UCxxxxxxxxxxxxxxxxxxx",
-        "file": "last_1day.txt",
-    },
+    "Taras Lawyer": "https://www.youtube.com/feeds/videos.xml?channel_id=UCJ9n2EJ3bX2G6a1q2Y7RZ7A",
+    "Знай Правду": "https://www.youtube.com/feeds/videos.xml?channel_id=UCV7zv5pFz7m5J4nJz7k3x0A",
+    "1 Day News": "https://www.youtube.com/feeds/videos.xml?channel_id=UCqRk3FJ3r8Yp9mZJpX2Lx9Q",
 }
 
 def send(text):
-    requests.post(
-        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-        json={
-            "chat_id": CHANNEL_ID,
-            "text": text,
-            "disable_web_page_preview": False,
-        },
-    )
-
-def load_last(path):
-    if not os.path.exists(path):
-        return ""
-    with open(path, "r", encoding="utf-8") as f:
-        return f.read().strip()
-
-def save_last(path, video_id):
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(video_id)
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    requests.post(url, data={
+        "chat_id": CHANNEL_ID,
+        "text": text,
+        "disable_web_page_preview": False
+    })
 
 def main():
-    for channel, cfg in CHANNELS.items():
-        feed = feedparser.parse(cfg["feed"])
+    for channel_name, feed_url in CHANNELS.items():
+        feed = feedparser.parse(feed_url)
+
         if not feed.entries:
             continue
 
-        latest = feed.entries[0]
-        video_id = latest.id
-        last_id = load_last(cfg["file"])
+        # 🔥 БЕРЁМ ТОЛЬКО САМОЕ НОВОЕ ВИДЕО
+        entry = feed.entries[0]
 
-        if video_id == last_id:
-            continue  # НЕТ НОВОГО ВИДЕО
+        title = entry.title
+        link = entry.link
 
-        title = latest.title
-        link = latest.link
-
-        text = (
-            f"📺 Новое видео\n"
-            f"Канал: {channel}\n\n"
-            f"{title}\n"
+        message = (
+            "📺 Новое видео\n"
+            f"Канал: {channel_name}\n\n"
+            f"{title}\n\n"
             f"{link}"
         )
 
-        send(text)
-        save_last(cfg["file"], video_id)
+        send(message)
 
 if __name__ == "__main__":
     main()
