@@ -2,77 +2,71 @@ import os
 import requests
 import feedparser
 import json
-from datetime import datetime
+import time
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
-CHANNEL_ID = os.environ["CHANNEL_ID"]
+CHANNEL_ID = int(os.environ["CHANNEL_ID"])
 
-# ===== YOUTUBE КАНАЛЫ =====
-YOUTUBE_CHANNELS = [
-    "UCgtxz5_xa6xkDTghNPkuRYw",   # Знай Правду
-    "UC0r4n3X5Q6nqQZxv6yTaras",   # Тарас Юрист (через @taras_lawyer)
-    "UC1daynewsxxxxxxxxxxxx",    # 1day_news
-]
+# ===== YouTube каналы (RSS) =====
+YOUTUBE_FEEDS = {
+    "Знай Правду": "https://www.youtube.com/feeds/videos.xml?channel_id=UCgtxz5_xa6xkDTghNPkuRYw",
+    "Taras Lawyer": "https://www.youtube.com/feeds/videos.xml?channel_id=UC4yG0dK6Pj4pXH2t3pX5L6A",
+    "1 Day News": "https://www.youtube.com/feeds/videos.xml?channel_id=UC9p1daynewsxxxxxxxxxxxx"
+}
 
-# ===== ФАЙЛ ДЕДУПЛИКАЦИИ =====
-SEEN_FILE = "seen_videos.json"
+STATE_FILE = "posted.json"
 
 
-def load_seen():
-    if not os.path.exists(SEEN_FILE):
+def load_state():
+    if not os.path.exists(STATE_FILE):
         return set()
-    with open(SEEN_FILE, "r", encoding="utf-8") as f:
+    with open(STATE_FILE, "r", encoding="utf-8") as f:
         return set(json.load(f))
 
 
-def save_seen(seen):
-    with open(SEEN_FILE, "w", encoding="utf-8") as f:
-        json.dump(list(seen), f)
+def save_state(state):
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(list(state), f)
 
 
-def send_to_telegram(text):
+def send_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {
+    data = {
         "chat_id": CHANNEL_ID,
         "text": text,
-        "parse_mode": "HTML",
         "disable_web_page_preview": False
     }
-    requests.post(url, data=payload, timeout=20)
-
-
-def fetch_channel_videos(channel_id):
-    feed_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
-    return feedparser.parse(feed_url).entries
+    requests.post(url, data=data, timeout=20)
 
 
 def main():
-    seen = load_seen()
-    new_seen = set(seen)
+    posted = load_state()
 
-    for channel in YOUTUBE_CHANNELS:
-        videos = fetch_channel_videos(channel)
+    for channel_name, feed_url in YOUTUBE_FEEDS.items():
+        feed = feedparser.parse(feed_url)
 
-        for video in videos:
-            video_id = video.get("yt_videoid")
-            if not video_id or video_id in seen:
+        for entry in feed.entries:
+            video_id = entry.get("id")
+            if not video_id or video_id in posted:
                 continue
 
-            title = video.title
-            link = video.link
-            published = video.published
+            title = entry.title
+            link = entry.link
+            published = entry.get("published", "")
 
-            text = (
-                "📺 <b>НОВОЕ ВИДЕО НА YOUTUBE</b>\n\n"
+            message = (
+                f"📺 НОВОЕ ВИДЕО НА YOUTUBE\n\n"
                 f"{title}\n\n"
                 f"{link}\n\n"
                 f"🕒 {published}"
             )
 
-            send_to_telegram(text)
-            new_seen.add(video_id)
+            send_message(message)
+            posted.add(video_id)
 
-    save_seen(new_seen)
+            time.sleep(2)
+
+    save_state(posted)
 
 
 if __name__ == "__main__":
