@@ -1,75 +1,57 @@
 import os
-import json
 import requests
 import feedparser
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
-CHANNEL_ID = int(os.environ["CHANNEL_ID"])
+CHANNEL_ID = os.environ["CHANNEL_ID"]
 
-# ===== YouTube RSS каналы =====
 YOUTUBE_FEEDS = {
     "Знай Правду": "https://www.youtube.com/feeds/videos.xml?channel_id=UCgtxz5_xa6xkDTghNPkuRYw",
-    "Taras Lawyer": "https://www.youtube.com/feeds/videos.xml?channel_id=UCxxxxxxxxxxxxxxxxxxxx",
-    "1 Day News": "https://www.youtube.com/feeds/videos.xml?channel_id=UCyyyyyyyyyyyyyyyyyyyy"
+    "Taras Lawyer": "https://www.youtube.com/feeds/videos.xml?channel_id=UCxxxxxxxxxxxxxxxxxx",
+    "1 Day News": "https://www.youtube.com/feeds/videos.xml?channel_id=UCxxxxxxxxxxxxxxxxxx",
 }
 
-STATE_FILE = "posted.json"
+def get_last_telegram_messages():
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
+    r = requests.get(url).json()
+    texts = []
+    for item in r.get("result", []):
+        msg = item.get("channel_post") or item.get("message")
+        if msg and "text" in msg:
+            texts.append(msg["text"])
+    return texts
 
-
-def load_state():
-    if not os.path.exists(STATE_FILE):
-        return set()
-    with open(STATE_FILE, "r", encoding="utf-8") as f:
-        return set(json.load(f))
-
-
-def save_state(state):
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(list(state), f)
-
-
-def send_message(text):
+def send(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    requests.post(url, data={
+    data = {
         "chat_id": CHANNEL_ID,
         "text": text,
         "disable_web_page_preview": False
-    })
-
+    }
+    requests.post(url, data=data)
 
 def main():
-    posted = load_state()
-    new_posts = []
+    already_sent = get_last_telegram_messages()
 
     for name, feed_url in YOUTUBE_FEEDS.items():
         feed = feedparser.parse(feed_url)
+        if not feed.entries:
+            continue
 
-        for entry in feed.entries:
-            video_id = entry.get("id")
-            if video_id in posted:
-                continue
+        video = feed.entries[0]  # ТОЛЬКО ПОСЛЕДНЕЕ
+        video_id = video.link
 
-            title = entry.title
-            link = entry.link
-            published = entry.published
+        if any(video_id in msg for msg in already_sent):
+            continue
 
-            message = (
-                f"📺 НОВОЕ ВИДЕО НА YOUTUBE\n\n"
-                f"{title}\n\n"
-                f"{link}\n\n"
-                f"🕒 {published}\n"
-                f"📌 Канал: {name}"
-            )
+        text = (
+            "📺 НОВОЕ ВИДЕО НА YOUTUBE\n\n"
+            f"{video.title}\n\n"
+            f"{video.link}\n\n"
+            f"📌 Канал: {name}"
+        )
 
-            new_posts.append((video_id, message))
-
-    # отправляем старые → новые (по времени)
-    for video_id, message in reversed(new_posts):
-        send_message(message)
-        posted.add(video_id)
-
-    save_state(posted)
-
+        send(text)
 
 if __name__ == "__main__":
     main()
