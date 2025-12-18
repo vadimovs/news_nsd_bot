@@ -1,128 +1,113 @@
 import os
-import hashlib
 import json
-import time
+import hashlib
 import requests
 import feedparser
 from openai import OpenAI
 
-# ====== CONFIG ======
+# ====== ENV ======
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHANNEL_ID = os.environ["CHANNEL_ID"]
 OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 
-STATE_FILE = "posted.json"
+client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Ключевые персоны + приоритет
-KEYWORDS_PRIORITY = [
-    ("trump", 3),
-    ("putin", 2),
-    ("zelensky", 1),
-]
+SENT_FILE = "sent.json"
 
+# ====== LOAD SENT ======
+if os.path.exists(SENT_FILE):
+    with open(SENT_FILE, "r", encoding="utf-8") as f:
+        sent_hashes = set(json.load(f))
+else:
+    sent_hashes = set()
+
+# ====== SOURCES ======
 FEEDS = [
     "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
     "https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml",
 ]
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+# ====== PRIORITY ======
+KEYWORDS = {
+    "trump": 1,
+    "putin": 2,
+    "zelensky": 3,
+}
 
+# ====== HELPERS ======
+def hash_news(title, link):
+    return hashlib.sha256(f"{title}{link}".encode()).hexdigest()
 
-# ====== UTILS ======
-def load_posted():
-    if os.path.exists(STATE_FILE):
-        with open(STATE_FILE, "r") as f:
-            return set(json.load(f))
-    return set()
+def get_priority(text):
+    text = text.lower()
+    for k, p in KEYWORDS.items():
+        if k in text:
+            return p
+    return None
 
-
-def save_posted(posted):
-    with open(STATE_FILE, "w") as f:
-        json.dump(list(posted), f)
-
-
-def hash_item(text):
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
-def detect_priority(text):
-    text_l = text.lower()
-    for key, prio in KEYWORDS_PRIORITY:
-        if key in text_l:
-            return prio
-    return 0
-
-
-def translate_and_summarize(title, summary):
+def translate_and_summarize(text):
     prompt = f"""
-Переведи на русский и кратко перескажи новость.
-Без воды. 3–4 предложения.
-
-Заголовок:
-{title}
+Переведи на русский и кратко перескажи новость (3–4 предложения).
+Без домыслов, только факты.
 
 Текст:
-{summary}
+{text}
 """
-    resp = client.chat.completions.create(
+    r = client.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.2,
     )
-    return resp.choices[0].message.content.strip()
-
+    return r.choices[0].message.content.strip()
 
 def send_to_telegram(text, link):
+    msg = f"{text}\n\n🔗 {link}"
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {
+    requests.post(url, json={
         "chat_id": CHANNEL_ID,
-        "text": f"📰 НОВОСТИ СЕГО ДНЯ\n\n{text}\n\n🔗 {link}",
-        "disable_web_page_preview": False,
-    }
-    requests.post(url, json=payload, timeout=10)
-
+        "text": msg,
+        "disable_web_page_preview": False
+    })
 
 # ====== MAIN ======
-def main():
-    posted = load_posted()
-    candidates = []
+candidates = []
 
-    for feed_url in FEEDS:
-        feed = feedparser.parse(feed_url)
-        for entry in feed.entries:
-            title = entry.get("title", "")
-            summary = entry.get("summary", "")
-            link = entry.get("link", "")
+for feed_url in FEEDS:
+    feed = feedparser.parse(feed_url)
+    for e in feed.entries[:10]:
+        title = e.title
+        link = e.link
+        summary = e.get("summary", "")
 
-            full_text = f"{title} {summary}"
-            prio = detect_priority(full_text)
+        h = hash_news(title, link)
+        if h in sent_hashes:
+            continue
 
-            if prio == 0:
-                continue
+        pr = get_priority(title + " " + summary)
+        if pr is None:
+            continue
 
-            h = hash_item(link)
-            if h in posted:
-                continue
+        candidates.append({
+            "priority": pr,
+            "title": title,
+            "summary": summary,
+            "link": link,
+            "hash": h
+        })
 
-            candidates.append((prio, title, summary, link, h))
+# ====== PICK BEST ======
+if not candidates:
+    print("Нет новых подходящих новостей")
+    exit(0)
 
-    if not candidates:
-        print("Нет новых приоритетных новостей")
-        return
+candidates.sort(key=lambda x: x["priority"])
+news = candidates[0]
 
-    # Сортировка по приоритету
-    candidates.sort(reverse=True, key=lambda x: x[0])
+text_ru = translate_and_summarize(news["summary"] or news["title"])
+send_to_telegram(text_ru, news["link"])
 
-    prio, title, summary, link, h = candidates[0]
+sent_hashes.add(news["hash"])
+with open(SENT_FILE, "w", encoding="utf-8") as f:
+    json.dump(list(sent_hashes), f, ensure_ascii=False)
 
-    text_ru = translate_and_summarize(title, summary)
-    send_to_telegram(text_ru, link)
-
-    posted.add(h)
-    save_posted(posted)
-
-    print("Отправлено:", title)
-
-
-if __name__ == "__main__":
-    main()
+print("Новость отправлена")
