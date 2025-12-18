@@ -1,72 +1,54 @@
-import os
-import requests
 import feedparser
+import requests
+import os
 
-BOT_TOKEN = os.environ["BOT_TOKEN"]
-CHANNEL_ID = os.environ["CHANNEL_ID"]
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHANNEL_ID = os.getenv("CHANNEL_ID")
 
-# ===== YouTube RSS (3 канала) =====
-CHANNELS = {
-    "Taras_Lawyer": {
-        "feed": "https://www.youtube.com/feeds/videos.xml?channel_id=UCgtxz5_xa6xkDTghNPkuRYw",
-        "last_file": "last_taras.txt",
+YOUTUBE_CHANNELS = {
+    "taras": {
+        "rss": "https://www.youtube.com/feeds/videos.xml?channel_id=UCgtxz5_xa6xkDTghNPkuRYw",
+        "file": "last_tarash.txt",
+        "name": "Taras Lawyer"
     },
-    "Znai_Pravdu": {
-        "feed": "https://www.youtube.com/feeds/videos.xml?channel_id=UCxxxxxxxxxxxxxxxxxxxx",
-        "last_file": "last_znai.txt",
+    "znai": {
+        "rss": "https://www.youtube.com/feeds/videos.xml?channel_id=UC6zHf0t1t0F6zE1vZ1tcQ3g",
+        "file": "last_znai.txt",
+        "name": "Знай Правду"
     },
-    "1_Day_News": {
-        "feed": "https://www.youtube.com/feeds/videos.xml?channel_id=UCxxxxxxxxxxxxxxxxxxxx",
-        "last_file": "last_1day.txt",
-    },
+    "oneday": {
+        "rss": "https://www.youtube.com/feeds/videos.xml?channel_id=UCwK5ZpR0Vd3Rz1k1ZzZQ1rA",
+        "file": "last_1day.txt",
+        "name": "1 Day News"
+    }
 }
 
-def read_last(path):
-    if not os.path.exists(path):
-        return ""
-    with open(path, "r", encoding="utf-8") as f:
-        return f.read().strip()
-
-def write_last(path, value):
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(value)
-
-def send_to_telegram(text):
+def send(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    requests.post(url, data={
+    requests.post(url, json={
         "chat_id": CHANNEL_ID,
         "text": text,
         "disable_web_page_preview": False
     })
 
-def process_channel(name, feed_url, last_file):
-    last_video = read_last(last_file)
-
-    feed = feedparser.parse(feed_url)
+for key, ch in YOUTUBE_CHANNELS.items():
+    feed = feedparser.parse(ch["rss"])
     if not feed.entries:
-        return
+        continue
 
-    entry = feed.entries[0]
-    video_id = entry.yt_videoid
-    video_url = entry.link
-    title = entry.title
+    latest = feed.entries[0]
+    video_id = latest.id
 
-    if video_id == last_video:
-        return
+    last_id = ""
+    if os.path.exists(ch["file"]):
+        with open(ch["file"], "r") as f:
+            last_id = f.read().strip()
 
-    text = (
-        f"📺 Новое видео:\n"
-        f"{title}\n"
-        f"{video_url}\n\n"
-        f"Канал: {name}"
-    )
+    if video_id == last_id:
+        continue
 
-    send_to_telegram(text)
-    write_last(last_file, video_id)
+    text = f"📺 {ch['name']}\n\n{latest.title}\n\n{latest.link}"
+    send(text)
 
-def main():
-    for name, data in CHANNELS.items():
-        process_channel(name, data["feed"], data["last_file"])
-
-if __name__ == "__main__":
-    main()
+    with open(ch["file"], "w") as f:
+        f.write(video_id)
