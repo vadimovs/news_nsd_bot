@@ -1,17 +1,16 @@
 import os
+import json
 import requests
 import feedparser
-import json
-import time
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHANNEL_ID = int(os.environ["CHANNEL_ID"])
 
-# ===== YouTube каналы (RSS) =====
+# ===== YouTube RSS каналы =====
 YOUTUBE_FEEDS = {
     "Знай Правду": "https://www.youtube.com/feeds/videos.xml?channel_id=UCgtxz5_xa6xkDTghNPkuRYw",
-    "Taras Lawyer": "https://www.youtube.com/feeds/videos.xml?channel_id=UC4yG0dK6Pj4pXH2t3pX5L6A",
-    "1 Day News": "https://www.youtube.com/feeds/videos.xml?channel_id=UC9p1daynewsxxxxxxxxxxxx"
+    "Taras Lawyer": "https://www.youtube.com/feeds/videos.xml?channel_id=UCxxxxxxxxxxxxxxxxxxxx",
+    "1 Day News": "https://www.youtube.com/feeds/videos.xml?channel_id=UCyyyyyyyyyyyyyyyyyyyy"
 }
 
 STATE_FILE = "posted.json"
@@ -31,40 +30,43 @@ def save_state(state):
 
 def send_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    data = {
+    requests.post(url, data={
         "chat_id": CHANNEL_ID,
         "text": text,
         "disable_web_page_preview": False
-    }
-    requests.post(url, data=data, timeout=20)
+    })
 
 
 def main():
     posted = load_state()
+    new_posts = []
 
-    for channel_name, feed_url in YOUTUBE_FEEDS.items():
+    for name, feed_url in YOUTUBE_FEEDS.items():
         feed = feedparser.parse(feed_url)
 
         for entry in feed.entries:
             video_id = entry.get("id")
-            if not video_id or video_id in posted:
+            if video_id in posted:
                 continue
 
             title = entry.title
             link = entry.link
-            published = entry.get("published", "")
+            published = entry.published
 
             message = (
                 f"📺 НОВОЕ ВИДЕО НА YOUTUBE\n\n"
                 f"{title}\n\n"
                 f"{link}\n\n"
-                f"🕒 {published}"
+                f"🕒 {published}\n"
+                f"📌 Канал: {name}"
             )
 
-            send_message(message)
-            posted.add(video_id)
+            new_posts.append((video_id, message))
 
-            time.sleep(2)
+    # отправляем старые → новые (по времени)
+    for video_id, message in reversed(new_posts):
+        send_message(message)
+        posted.add(video_id)
 
     save_state(posted)
 
