@@ -1,77 +1,77 @@
+# bot.py
 import os
 import json
+import time
 import requests
-from datetime import datetime, timezone
-import feedparser
+import xml.etree.ElementTree as ET
 
-BOT_TOKEN = os.environ["BOT_TOKEN"]
-CHANNEL_ID = os.environ["CHANNEL_ID"]
-
-STATE_FILE = "yt_state.json"
+TELEGRAM_TOKEN = os.getenv("BOT_TOKEN")
+CHANNEL_ID = os.getenv("CHANNEL_ID")
 
 YOUTUBE_FEEDS = [
     "https://www.youtube.com/feeds/videos.xml?channel_id=UCgtxz5_xa6xkDTghNPkuRYw",
-    "https://www.youtube.com/feeds/videos.xml?channel_id=UC7pGq6bQbY8h4YkYz2G9J3Q"  # taras_lawyer
+    "https://www.youtube.com/feeds/videos.xml?channel_id=UC5EoX6PZz2n9XyE6R9nK0kA"  # taras_lawyer
 ]
+
+STATE_FILE = "posted_videos.json"
 
 
 def load_state():
-    if os.path.exists(STATE_FILE):
-        with open(STATE_FILE, "r") as f:
-            return json.load(f)
-    return {}
+    if not os.path.exists(STATE_FILE):
+        return set()
+    with open(STATE_FILE, "r") as f:
+        return set(json.load(f))
 
 
 def save_state(state):
     with open(STATE_FILE, "w") as f:
-        json.dump(state, f)
+        json.dump(list(state), f)
 
 
 def send_telegram(text):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    requests.post(url, json={
         "chat_id": CHANNEL_ID,
         "text": text,
         "disable_web_page_preview": False
-    }
-    requests.post(url, json=payload, timeout=20)
+    })
+
+
+def parse_feed(url):
+    r = requests.get(url, timeout=15)
+    r.raise_for_status()
+    root = ET.fromstring(r.text)
+    ns = {"yt": "http://www.youtube.com/xml/schemas/2015", "atom": "http://www.w3.org/2005/Atom"}
+    videos = []
+    for entry in root.findall("atom:entry", ns):
+        vid = entry.find("yt:videoId", ns).text
+        title = entry.find("atom:title", ns).text
+        link = entry.find("atom:link", ns).attrib["href"]
+        published = entry.find("atom:published", ns).text
+        videos.append((vid, title, link, published))
+    return videos
 
 
 def main():
-    state = load_state()
-    updated = False
+    posted = load_state()
+    new_posted = set(posted)
 
-    for feed_url in YOUTUBE_FEEDS:
-        feed = feedparser.parse(feed_url)
-        if not feed.entries:
-            continue
+    for feed in YOUTUBE_FEEDS:
+        videos = parse_feed(feed)
+        for vid, title, link, published in videos:
+            if vid in posted:
+                continue
+            msg = (
+                "📺 НОВОЕ ВИДЕО НА YOUTUBE\n\n"
+                f"{title}\n\n"
+                f"{link}\n"
+                f"🕒 {published}"
+            )
+            send_telegram(msg)
+            new_posted.add(vid)
+            time.sleep(2)
 
-        latest = feed.entries[0]
-        video_id = latest.get("yt_videoid")
-        published = latest.get("published")
-
-        if not video_id:
-            continue
-
-        if state.get(feed_url) == video_id:
-            continue
-
-        title = latest.title
-        link = latest.link
-
-        msg = (
-            "📺 НОВОЕ ВИДЕО НА YOUTUBE\n\n"
-            f"{title}\n\n"
-            f"{link}\n\n"
-            f"🕒 {published}"
-        )
-
-        send_telegram(msg)
-        state[feed_url] = video_id
-        updated = True
-
-    if updated:
-        save_state(state)
+    save_state(new_posted)
 
 
 if __name__ == "__main__":
