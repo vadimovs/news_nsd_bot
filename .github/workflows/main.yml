@@ -1,9 +1,9 @@
 name: Telegram News Bot
 
 on:
-  schedule:
-    - cron: "*/15 * * * *"
   workflow_dispatch:
+  schedule:
+    - cron: "*/30 * * * *"
 
 jobs:
   run:
@@ -21,11 +21,3 @@ jobs:
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
-
-      - name: Commit last video state
-        run: |
-          git config user.name "bot"
-          git config user.email "bot@github.com"
-          git add last_*.txt
-          git commit -m "update last video" || echo "no changes"
-          git push
