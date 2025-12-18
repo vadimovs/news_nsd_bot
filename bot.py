@@ -1,144 +1,105 @@
 import os
-import json
-import time
 import requests
 import feedparser
-from openai import OpenAI
+import hashlib
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHANNEL_ID = os.environ["CHANNEL_ID"]
-OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+# ===== ИСТОЧНИКИ =====
+RSS_SOURCES = [
+    "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
+    "https://www.reuters.com/rssFeed/worldNews",
+    "https://feeds.bbci.co.uk/news/world/rss.xml",
+    "https://apnews.com/rss/apf-world-rss.xml",
+    "https://www.aljazeera.com/xml/rss/all.xml",
 
-POSTED_FILE = "posted.json"
-
-SOURCES = {
-    "NY Times": [
-        "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"
-    ],
-    "Reuters": [
-        "https://feeds.reuters.com/Reuters/worldNews"
-    ],
-    "BBC": [
-        "https://feeds.bbci.co.uk/news/world/rss.xml"
-    ]
-}
-
-KEYWORDS_PRIORITY = [
-    ("трамп", 3),
-    ("trump", 3),
-    ("путин", 2),
-    ("putin", 2),
-    ("зеленск", 1),
-    ("zelensky", 1)
+    # YouTube канал
+    "https://www.youtube.com/feeds/videos.xml?channel_id=UCgtxz5_xa6xkDTghNPkuRYw"
 ]
 
+PRIORITY = [
+    ("trump", 1),
+    ("putin", 2),
+    ("zelensky", 3)
+]
 
-def load_posted():
-    if not os.path.exists(POSTED_FILE):
+HISTORY_FILE = "sent_news.txt"
+
+
+def load_history():
+    if not os.path.exists(HISTORY_FILE):
         return set()
-    with open(POSTED_FILE, "r", encoding="utf-8") as f:
-        return set(json.load(f))
+    with open(HISTORY_FILE, "r") as f:
+        return set(line.strip() for line in f)
 
 
-def save_posted(posted):
-    with open(POSTED_FILE, "w", encoding="utf-8") as f:
-        json.dump(list(posted), f, ensure_ascii=False, indent=2)
+def save_history(history):
+    with open(HISTORY_FILE, "w") as f:
+        for h in history:
+            f.write(h + "\n")
 
 
-def translate(text):
-    if not text.strip():
-        return text
-
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {
-                "role": "system",
-                "content": "Переведи текст на русский язык, кратко и нейтрально."
-            },
-            {
-                "role": "user",
-                "content": text
-            }
-        ],
-        temperature=0.3
-    )
-    return response.choices[0].message.content.strip()
-
-
-def priority_score(text):
-    score = 0
-    lower = text.lower()
-    for word, weight in KEYWORDS_PRIORITY:
-        if word in lower:
-            score += weight
-    return score
-
-
-def send_to_telegram(message):
+def send_telegram(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {
+    data = {
         "chat_id": CHANNEL_ID,
-        "text": message,
-        "parse_mode": "HTML",
+        "text": text,
         "disable_web_page_preview": False
     }
-    requests.post(url, data=payload, timeout=20)
+    requests.post(url, data=data)
+
+
+def score_item(title):
+    t = title.lower()
+    for key, score in PRIORITY:
+        if key in t:
+            return score
+    return 99
+
+
+def fetch_all_news():
+    items = []
+    for src in RSS_SOURCES:
+        feed = feedparser.parse(src)
+        for entry in feed.entries:
+            title = entry.title
+            link = entry.link
+            uid = hashlib.md5((title + link).encode()).hexdigest()
+            items.append({
+                "title": title,
+                "link": link,
+                "uid": uid,
+                "priority": score_item(title)
+            })
+    return items
 
 
 def main():
-    posted = load_posted()
-    candidates = []
+    history = load_history()
+    news = fetch_all_news()
 
-    for source, feeds in SOURCES.items():
-        for feed_url in feeds:
-            feed = feedparser.parse(feed_url)
+    # убираем уже отправленные
+    fresh = [n for n in news if n["uid"] not in history]
 
-            for entry in feed.entries[:10]:
-                link = entry.get("link")
-                if not link or link in posted:
-                    continue
-
-                title = entry.get("title", "")
-                summary = entry.get("summary", "")
-
-                score = priority_score(title + " " + summary)
-                if score == 0:
-                    continue
-
-                candidates.append({
-                    "source": source,
-                    "title": title,
-                    "summary": summary,
-                    "link": link,
-                    "score": score
-                })
-
-    if not candidates:
-        print("Нет новых приоритетных новостей")
+    if not fresh:
+        print("Новых новостей нет")
         return
 
-    # 🔥 выбираем САМУЮ приоритетную
-    candidates.sort(key=lambda x: x["score"], reverse=True)
-    news = candidates[0]
+    # сортировка по приоритету
+    fresh.sort(key=lambda x: x["priority"])
 
-    title_ru = translate(news["title"])
-    text_ru = translate(news["summary"])
+    item = fresh[0]
+    history.add(item["uid"])
+    save_history(history)
 
     message = (
-        f"<b>НОВОСТИ СЕГО ДНЯ</b>\n\n"
-        f"<b>{title_ru}</b>\n\n"
-        f"{text_ru}\n\n"
-        f"🔗 {news['link']}\n"
-        f"Источник: {news['source']}"
+        "📰 НОВОСТИ СЕГОДНЯ\n\n"
+        f"{item['title']}\n\n"
+        f"{item['link']}"
     )
 
-    send_to_telegram(message)
-
-    posted.add(news["link"])
-    save_posted(posted)
+    send_telegram(message)
 
 
 if __name__ == "__main__":
