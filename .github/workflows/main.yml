@@ -1,33 +1,26 @@
-name: Telegram News Bot
+name: Telegram YouTube Bot
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: "*/10 * * * *"   # каждые 10 минут
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
 
 jobs:
-  run-bot:
+  run:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
+      - name: Install deps
+        run: pip install -r requirements.txt
 
       - name: Run bot
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
-          LAST_TARAS: ${{ secrets.LAST_TARAS }}
-          LAST_ZNAI: ${{ secrets.LAST_ZNAI }}
-          LAST_1DAY: ${{ secrets.LAST_1DAY }}
-        run: |
-          python bot.py
+        run: python bot.py
