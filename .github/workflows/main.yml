@@ -1,8 +1,8 @@
-name: Telegram YouTube Bot
+name: Telegram News Bot
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "*/15 * * * *"
   workflow_dispatch:
 
 jobs:
@@ -11,16 +11,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v4
         with:
           python-version: "3.11"
 
-      - name: Install deps
-        run: pip install -r requirements.txt
+      - run: pip install -r requirements.txt
 
-      - name: Run bot
+      - run: python bot.py
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
-        run: python bot.py
+
+      - name: Commit last video state
+        run: |
+          git config user.name "bot"
+          git config user.email "bot@github.com"
+          git add last_*.txt
+          git commit -m "update last video" || echo "no changes"
+          git push
