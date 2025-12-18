@@ -6,9 +6,9 @@ BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHANNEL_ID = os.environ["CHANNEL_ID"]
 
 YOUTUBE_FEEDS = {
-    "Taras Lawyer": "https://www.youtube.com/feeds/videos.xml?channel_id=UCYwVZ2qkK8sG6nQ6X3xY7XA",
-    "Знай Правду": "https://www.youtube.com/feeds/videos.xml?channel_id=UC0n8YH6sZ0K0QK9yKpZqzDQ",
-    "1 Day News": "https://www.youtube.com/feeds/videos.xml?channel_id=UC5WZzqgYH7d8dZ5x8nZp5rA",
+    "Taras Lawyer": "https://www.youtube.com/feeds/videos.xml?channel_id=UC0z9qR4K9X6sFzq8h8v9wQ",
+    "Знай Правду": "https://www.youtube.com/feeds/videos.xml?channel_id=UCqJm4C0b5b8Jxk9rPZx8c8A",
+    "1 Day News": "https://www.youtube.com/feeds/videos.xml?channel_id=UCV7k9zXz7yZpY9t5mR8d6sA",
 }
 
 def send_message(text):
@@ -27,9 +27,11 @@ def main():
         if not feed.entries:
             continue
 
-        latest = feed.entries[0]
-        title = latest.title
-        link = latest.link
+        # ❗ Берём ТОЛЬКО самое новое видео
+        video = feed.entries[0]
+
+        title = video.title
+        link = video.link
 
         message = (
             f"📺 Новое видео\n"
