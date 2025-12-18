@@ -1,75 +1,75 @@
 import os
+import json
+import time
 import requests
-import xml.etree.ElementTree as ET
+import feedparser
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
-CHANNEL_ID = int(os.environ["CHANNEL_ID"])
+CHANNEL_ID = os.environ["CHANNEL_ID"]
 
-# ===== YOUTUBE КАНАЛЫ (МОЖЕШЬ ДОБАВЛЯТЬ СЮДА) =====
+# === YOUTUBE КАНАЛЫ ===
 YOUTUBE_CHANNELS = [
     "UCgtxz5_xa6xkDTghNPkuRYw",   # канал 1
-    "UCxxxxxxxxxxxxxxxxxx",      # канал 2 (если добавишь)
+    "UCxxxxxxxxxxxxxxxxxxxx",   # канал 2
 ]
 
-# ===== ФАЙЛ ДЛЯ ДЕДУПЛИКАЦИИ =====
-SEEN_FILE = "seen_videos.txt"
-
+# === ФАЙЛ ДЕДУПЛИКАЦИИ ===
+SEEN_FILE = "seen_videos.json"
 
 def load_seen():
     if not os.path.exists(SEEN_FILE):
         return set()
     with open(SEEN_FILE, "r") as f:
-        return set(line.strip() for line in f.readlines())
-
+        return set(json.load(f))
 
 def save_seen(seen):
     with open(SEEN_FILE, "w") as f:
-        for v in seen:
-            f.write(v + "\n")
+        json.dump(list(seen), f)
 
-
-def send_message(text):
+def send_to_telegram(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    data = {
+    payload = {
         "chat_id": CHANNEL_ID,
         "text": text,
+        "parse_mode": "HTML",
         "disable_web_page_preview": False
     }
-    requests.post(url, data=data)
-
+    requests.post(url, json=payload)
 
 def fetch_channel_videos(channel_id):
-    rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
-    r = requests.get(rss_url, timeout=15)
-    root = ET.fromstring(r.text)
-    ns = {"yt": "http://www.youtube.com/xml/schemas/2015"}
-
-    videos = []
-    for entry in root.findall("entry"):
-        video_id = entry.find("yt:videoId", ns).text
-        title = entry.find("title").text
-        link = f"https://www.youtube.com/watch?v={video_id}"
-        videos.append((video_id, title, link))
-    return videos
-
+    feed_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
+    feed = feedparser.parse(feed_url)
+    return feed.entries
 
 def main():
     seen = load_seen()
+    new_seen = set(seen)
 
     for channel in YOUTUBE_CHANNELS:
         videos = fetch_channel_videos(channel)
 
-        for video_id, title, link in videos:
+        for video in videos:
+            video_id = video.get("id")
             if video_id in seen:
                 continue
 
-            message = f"📺 НОВОЕ ВИДЕО\n\n{title}\n\n{link}"
-            send_message(message)
+            title = video.get("title", "Новое видео")
+            link = video.get("link")
+            published = video.get("published", "")
 
-            seen.add(video_id)
+            message = (
+                "📺 <b>НОВОЕ ВИДЕО НА YOUTUBE</b>\n\n"
+                f"<b>{title}</b>\n\n"
+                f"{link}\n\n"
+                f"🕒 {published}"
+            )
 
-    save_seen(seen)
+            send_to_telegram(message)
+            new_seen.add(video_id)
 
+            time.sleep(2)  # чтобы Telegram не резал
+
+    save_seen(new_seen)
 
 if __name__ == "__main__":
     main()
